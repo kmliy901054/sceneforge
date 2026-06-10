@@ -1,0 +1,26 @@
+Couldn't connect to the Hub: Cannot reach https://huggingface.co/api/models/stabilityai/stable-diffusion-xl-base-1.0: offline mode is enabled. To disable it, please unset the `HF_HUB_OFFLINE` environment variable..
+Will try to load from local cache.
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Loading pipeline components...:  29%|██▊       | 2/7 [00:00<00:00, 16.67it/s]Loading pipeline components...:  71%|███████▏  | 5/7 [00:00<00:00, 14.22it/s]Loading pipeline components...: 100%|██████████| 7/7 [00:00<00:00, 18.48it/s]
+frame00 ok
+frame01 ok
+frame02 ok
+frame03 ok
+frame04 ok
+frame05 ok
+frame06 ok
+frame07 ok
+frame08 ok
+frame09 ok
+frame10 ok
+frame11 ok
+frame12 ok
+frame13 ok
+frame14 ok
+frame15 ok
+frame16 ok
+frame17 ok
+frame18 ok
+frame19 ok
+frame20 ok
+frame21 ok
+variants: 88

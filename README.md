@@ -161,6 +161,29 @@ Deeper reading:
 
 ---
 
+## v2 — Research extension: probing (and fixing) VLA appearance brittleness
+
+After the course submission, SceneForge's core trick — *hold geometry fixed, vary only appearance* — was inverted into a **measurement instrument** for a research question: do VLA policies ground their actions in 3D, or in RGB appearance?
+
+**The probe** (`experiments/vla_probe/`): 22 real BridgeData V2 frames × 20 controlled variants (photometric / background-restyle-with-pixel-identical-workspace / geometry / temporal baselines) × deterministic inference = 440 action predictions per model, run on OpenVLA-7B and SpatialVLA-4B. Findings (full reports: [`REPORT.md`](experiments/vla_probe/REPORT.md), [`COMPARISON.md`](experiments/vla_probe/COMPARISON.md), literature memo: [`docs/research/vla_3d_hypothesis_literature.md`](docs/research/vla_3d_hypothesis_literature.md)):
+
+- VLAs do **not** collapse under appearance change in open loop — deviations order correctly (photometric < background < geometry < temporal), and gripper decisions almost never flip.
+- But restyling pixels the robot never needs (background only, workspace bitwise-identical) still shifts the commanded translation ~6 mm ≈ **8× the measurement floor ≈ 68–74 % of a genuine geometric change**: background appearance measurably leaks into the action head.
+- A 2025 "3D-aware" VLA showed **no better disentanglement** than 2024 RGB-only OpenVLA (all paired tests p ≥ 0.22) — plausibly because its 3D channel is *estimated from the same RGB pixels*. Rendered ground-truth geometry (what SceneForge exports) is not the same thing as RGB-derived depth.
+- Literature agrees the *catastrophic* axis is camera viewpoint (e.g. OpenVLA 76.5 % → 1.1 % under viewpoint shift in LIBERO-Plus), with appearance factors severe but secondary.
+
+**The fixes shipped as v2 tools** — each maps to a measured failure mode:
+
+| Tool | Failure mode it attacks | Usage |
+|---|---|---|
+| `scripts/augment_frames.py` (`sceneforge.augment`) | background leakage → appearance-invariance training data: ROSIE-style restyle of **real** robot frames/episodes; near-workspace pixels bitwise-preserved (so action labels stay exactly valid), background re-imagined per style with temporally smoothed masks; video in → video out | `python scripts/augment_frames.py EPISODE_DIR --out OUT --n-styles 4 [--llm-styles]` |
+| `scripts/forge_viewsweep.py` | viewpoint brittleness → same scene exported across a camera grid, one COCO zip with per-image intrinsics `K` + extrinsics pose | `python scripts/forge_viewsweep.py --task "..." --views 8 --styles 2` |
+| RGB-D COCO export (now default) | RGB-estimated depth ≠ 3D grounding → every export carries `depth/*_depth16.png` (metric mm) + `cameras.json` | automatic in UI export and both scripts |
+
+Validated on this machine: 12-frame restyle in 23.6 s (0.55 s/img, near pixels verified bitwise-identical by an independent process); 4-view × 2-style sweep exports a COCO zip whose camera matrices match the renderer's normative projection to 1e-5. Test suite: 210 green.
+
+---
+
 ## Acknowledgment
 
 Built end-to-end through an agentic workflow (Claude Code, Fable 5) with multi-agent ideation, adversarial design review, implementation, and verification; the full process is documented in [`docs/WORKFLOW_LOG.md`](docs/WORKFLOW_LOG.md).

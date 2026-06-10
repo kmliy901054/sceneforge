@@ -5,3 +5,7 @@ outputs/
 *.egg-info/
 .gradio/
 flagged/
+experiments/vla_probe/images/*
+!experiments/vla_probe/images/provenance.json
+experiments/vla_probe/masks/*
+!experiments/vla_probe/masks/audit_sheet.jpg

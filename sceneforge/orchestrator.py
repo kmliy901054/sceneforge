@@ -781,12 +781,14 @@ def export_coco(run_dir: Union[str, Path], include_quarantined: bool = False) ->
             for i in meta["instances"]
         ]
         layout_idx = int(meta["layout_idx"])
+        depth16 = layout_dir / "depth16.png"  # feature C: RGB-D export source
         layouts.append(SimpleNamespace(
             layout_idx=layout_idx,
             spec=json.loads(spec_path.read_text(encoding="utf-8")),
             render=SimpleNamespace(width=int(meta["width"]),
                                    height=int(meta["height"]),
                                    instances=instances),
+            depth16_path=str(depth16) if depth16.is_file() else None,
         ))
         for img_path in sorted(layout_dir.glob("img_*.png")):
             slug = img_path.stem[len("img_"):]

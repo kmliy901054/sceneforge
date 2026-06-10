@@ -36,6 +36,20 @@ LEVEL_PARAMS: dict[int, dict[str, Any]] = {
     3: dict(steps=20, guidance_scale=7.5, cond_scale=0.8, control_guidance_end=1.0),
 }
 
+def aspect_size(width: int, height: int, max_side: int) -> tuple[int, int]:
+    """Scale (width, height) so the long side is ``max_side``, rounded to
+    multiples of 64 (SDXL latent/UNet alignment), each side ≥ 64.
+
+    e.g. 640×480 @ 768 → (768, 576) — used by the augment restyler to generate
+    at the source frame's aspect ratio instead of distorting to a square.
+    """
+    scale = max_side / max(width, height)
+    return (
+        max(64, int(round(width * scale / 64.0)) * 64),
+        max(64, int(round(height * scale / 64.0)) * 64),
+    )
+
+
 SDXL_BASE = "stabilityai/stable-diffusion-xl-base-1.0"
 CONTROLNET_DEPTH = "diffusers/controlnet-depth-sdxl-1.0"
 VAE_FIX = "madebyollin/sdxl-vae-fp16-fix"
@@ -136,26 +150,35 @@ class ForgePipeline:
         seed: int = 0,
         cond_scale: float | None = None,
         steps: int | None = None,
+        size: tuple[int, int] | None = None,
     ) -> Image.Image:
         """One image. Defaults come from the loaded level's §7.4 params.
 
+        ``size``: optional explicit (width, height) — used by the augment
+        restyler for non-square REAL robot frames (both must be multiples of
+        8; ``aspect_size`` rounds to 64). None keeps the classic square
+        ``resolution`` × ``resolution`` behavior.
+
         OOM recovery per §7.5 (unit-tested with a mocked OutOfMemoryError in
         tests/test_gpu.py): cpu -> gc -> empty_cache -> cpu_offload -> retry
-        ONCE -> still OOM -> 640 px for the remainder of the burst.
+        ONCE -> still OOM -> 640 px (explicit sizes are rescaled to a 640 max
+        side) for the remainder of the burst.
         """
         if self.pipe is None or self.level is None:
             raise RuntimeError("ForgePipeline.generate() before load(level)")
         try:
-            return self._call(control, prompt, negative, seed, cond_scale, steps)
+            return self._call(control, prompt, negative, seed, cond_scale, steps, size)
         except torch.cuda.OutOfMemoryError:
             logger.warning("CUDA OOM — running §7.5 recovery (cpu_offload)")
             self._recover_oom()
             try:
-                return self._call(control, prompt, negative, seed, cond_scale, steps)
+                return self._call(control, prompt, negative, seed, cond_scale, steps, size)
             except torch.cuda.OutOfMemoryError:
                 logger.warning("OOM persists after cpu_offload — dropping to 640 px (V4)")
                 self.resolution = 640
-                return self._call(control, prompt, negative, seed, cond_scale, steps)
+                if size is not None:
+                    size = aspect_size(size[0], size[1], 640)
+                return self._call(control, prompt, negative, seed, cond_scale, steps, size)
 
     def _recover_oom(self) -> None:
         """Exact §7.5 sequence; latches force_sequential for the session."""
@@ -175,8 +198,10 @@ class ForgePipeline:
         seed: int,
         cond_scale: float | None,
         steps: int | None,
+        size: tuple[int, int] | None = None,
     ) -> Image.Image:
         p = LEVEL_PARAMS[self.level]  # type: ignore[index]
+        width, height = size if size is not None else (self.resolution, self.resolution)
         gen_device = self.device if torch.cuda.is_available() else "cpu"
         generator = torch.Generator(gen_device).manual_seed(seed)
         self._sample_free()
@@ -194,8 +219,8 @@ class ForgePipeline:
             controlnet_conditioning_scale=(
                 cond_scale if cond_scale is not None else p["cond_scale"]),
             control_guidance_end=p["control_guidance_end"],
-            width=self.resolution,
-            height=self.resolution,
+            width=width,
+            height=height,
             generator=generator,
             callback_on_step_end=self._step_callback,
         )
