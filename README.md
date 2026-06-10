@@ -168,10 +168,13 @@ VLA/robot-policy training data is mostly *video episodes*, not single images —
 | Tool | What it does | Usage |
 |---|---|---|
 | `scripts/augment_frames.py` (`sceneforge.augment`) | ROSIE-style appearance randomization of **real** robot frames or videos: near-workspace pixels are bitwise-preserved (action labels stay exactly valid), the background is re-imagined per style under depth control with temporally smoothed masks; video in → video out | `python scripts/augment_frames.py EPISODE_OR_VIDEO --out OUT --n-styles 4 [--llm-styles]` |
+| `scripts/augment_dataset.py` | **LeRobot v2.x dataset in → LeRobot datasets out**: restyles chosen camera streams of a whole episode dataset; parquet/actions/states/timestamps copied bytewise, one valid output dataset per style, provenance fingerprint included | `python scripts/augment_dataset.py --dataset DIR --out DIR --cameras KEY --n-styles 2` |
 | `scripts/forge_viewsweep.py` | same scene exported across a camera grid — viewpoint-randomized data, one COCO zip with per-image intrinsics `K` + extrinsics pose | `python scripts/forge_viewsweep.py --task "..." --views 8 --styles 2` |
 | RGB-D COCO export (default) | every export carries rendered metric depth (`depth/*_depth16.png`) + `cameras.json` | automatic in UI export and both scripts |
 
-Validated on this machine: 12-frame episode restyle in 23.6 s (0.55 s/img; near pixels verified bitwise-identical by an independent process); 4-view × 2-style sweep exports a COCO zip whose camera matrices match the renderer's normative projection to 1e-5. Test suite: 210 green.
+The Gradio app gains a **Video Augment tab**: upload an episode video (or frames dir), pick styles, and get side-by-side original/restyled players, a mask audit sheet, and a zip download — same VRAM phase discipline as the Forge tab.
+
+Validated on this machine: 12-frame episode restyle in 23.6 s (0.55 s/img; near pixels verified bitwise-identical at the composite stage, within codec noise after h264 re-encode); a real mini LeRobot v2.1 dataset augmented end-to-end in 47 s with both outputs passing structural validation; 4-view × 2-style sweep exports a COCO zip whose camera matrices match the renderer's normative projection to 1e-5. Test suite: 229 green.
 
 ---
 

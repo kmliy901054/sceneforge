@@ -8,6 +8,13 @@ is never silent. Generation order is asserted layout-major here (§4.8).
 
 ``on_reforge`` makes no LLM calls; ``on_toggle`` is a pure cached-path swap
 (§8.2); ``on_export`` builds the COCO zip; ``on_timer`` feeds the VRAM footer.
+
+``on_video_augment`` (tab 2) is a generator: it runs
+``sceneforge.augment.restyle_frames`` in a worker thread — reusing the
+ForgeRun singleton's SDXL pipeline inside ``gpu.phase("diffusion")`` so the
+augmenter never double-loads SDXL next to the forge tenant — and streams a
+status line by polling the written frame files (~1 s ticks), then returns the
+side-by-side original/restyled videos, the mask audit sheet and a zip bundle.
 """
 from __future__ import annotations
 
@@ -15,8 +22,10 @@ import sceneforge.compat  # noqa: F401  — first import (§0)
 
 import logging
 import random
+import shutil
 import threading
 import time
+from pathlib import Path
 from typing import Any, Iterator, Optional
 
 import gradio as gr
@@ -260,6 +269,147 @@ def on_export(state: Optional[dict], include_quarantined: bool) -> tuple[Any, st
         logger.exception("export failed")
         return gr.update(), f"**export failed** — {exc}"
     return gr.update(value=str(zip_path)), f"**exported** `{zip_path}`"
+
+
+# --------------------------------------------------------- on_video_augment
+#: video-augment tab slot count (blocks.py builds this many original/restyled
+#: player pairs; the styles slider is capped here).
+VIDEO_AUGMENT_MAX_STYLES = 4
+
+#: on_video_augment output order — keep in sync with blocks.py wiring:
+#: (status, audit, download, orig_0, restyled_0, …, orig_3, restyled_3).
+
+
+def _frames_to_video(frames_dir: Path, out_path: Path, fps: float) -> Optional[str]:
+    """Assemble a directory of frames into an mp4 for the tab's players
+    (display only — datasets go through lerobot_io). Frames are cropped to
+    even dimensions for yuv420p; returns None if assembly fails."""
+    try:
+        from sceneforge.augment.lerobot_io import write_video
+        from sceneforge.augment.restyle import _collect_frames
+
+        frames, _names, _fps, _is_video = _collect_frames(frames_dir)
+        frames = [f[: f.shape[0] // 2 * 2, : f.shape[1] // 2 * 2] for f in frames]
+        write_video(frames, out_path, fps or 10.0)
+        return str(out_path)
+    except Exception:  # noqa: BLE001 — display video is best-effort
+        logger.exception("frame→video assembly failed for %s", frames_dir)
+        return None
+
+
+def on_video_augment(video_file: Optional[str], frames_dir: str,
+                     n_styles: float, styles_text: str, keep_pct: float,
+                     window: float) -> Iterator[tuple]:
+    """Generator handler for the Video Augment tab's AUGMENT button.
+
+    Streams status while restyle_frames runs in a worker thread; progress is
+    read off the filesystem (masks/*_keep.png = frame count, frames/<style>/*
+    = composites done) so the UI is never silent during the SDXL burst.
+    """
+    n = max(1, min(int(n_styles), VIDEO_AUGMENT_MAX_STYLES))
+    hidden = gr.update(value=None, visible=False)
+    out: dict[str, Any] = {"status": "**starting…**", "audit": None,
+                           "download": gr.update(),
+                           "slots": [hidden] * (2 * VIDEO_AUGMENT_MAX_STYLES)}
+
+    def tup() -> tuple:
+        return (out["status"], out["audit"], out["download"], *out["slots"])
+
+    src = video_file or (frames_dir or "").strip()
+    if not src:
+        out["status"] = "**upload a video or set a frames directory first**"
+        yield tup()
+        return
+    src_path = Path(src)
+    if not src_path.exists():
+        out["status"] = f"**input not found** — `{src_path}`"
+        yield tup()
+        return
+    is_video_input = src_path.is_file()
+
+    style_prompts = [l.strip() for l in (styles_text or "").splitlines()
+                     if l.strip()] or None
+    win = int(window)
+    win = win + 1 if win % 2 == 0 else win  # build_keep_masks wants odd
+
+    cfg = get_config()
+    run_dir = (Path(cfg.paths.runs_dir) /
+               f"video_augment_{time.strftime('%Y%m%d_%H%M%S')}")
+    out["status"] = (f"**preparing** (pipeline load + decode + depth)… "
+                     f"→ `{run_dir.name}`")
+    yield tup()
+
+    result: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            from sceneforge.augment import restyle_frames
+
+            runner = get_runner()
+            # §10.3 discipline: Ollama eviction barrier + the SHARED SDXL
+            # pipeline (no second ForgePipeline next to the forge tenant).
+            with gpu.phase("diffusion", cfg=cfg):
+                runner.ensure_pipeline()
+                result["prov"] = restyle_frames(
+                    str(src_path), run_dir, n_styles=n,
+                    keep_percentile=float(keep_pct),
+                    style_prompts=style_prompts, smooth_window=win,
+                    cfg=cfg, pipeline=runner.pipeline)
+        except Exception as exc:  # noqa: BLE001 — surfaced in the status line
+            logger.exception("video augment failed")
+            result["error"] = exc
+
+    worker = threading.Thread(target=_worker, name="video-augment", daemon=True)
+    worker.start()
+    while worker.is_alive():
+        worker.join(timeout=1.0)
+        n_frames = len(list((run_dir / "masks").glob("*_keep.png"))) \
+            if (run_dir / "masks").is_dir() else 0
+        if n_frames:
+            done = len(list((run_dir / "frames").glob("*/*.png")))
+            out["status"] = (f"**restyling** {done}/{n_frames * n} frames "
+                             f"· {n} style(s) · keep {keep_pct:.0f}%")
+        yield tup()
+    if "error" in result:
+        out["status"] = f"**AUGMENT FAILED** — {result['error']}"
+        yield tup()
+        return
+
+    prov = result["prov"]
+    fps = prov.get("fps") or 10.0
+    out["audit"] = prov["outputs"]["audit_sheet"]
+    original_mp4 = (str(src_path) if is_video_input else
+                    _frames_to_video(src_path, run_dir / "video_original.mp4",
+                                     fps))
+    videos = prov["outputs"].get("videos") or {}
+    slots: list = []
+    for i, style in enumerate(prov["styles"][:VIDEO_AUGMENT_MAX_STYLES]):
+        slug = style["name"]
+        restyled = videos.get(slug) or _frames_to_video(
+            run_dir / "frames" / slug, run_dir / f"video_{slug}.mp4", fps)
+        slots.append(gr.update(value=original_mp4, visible=True,
+                               label=f"original · {slug}"))
+        slots.append(gr.update(value=restyled, visible=True,
+                               label=f"restyled · {slug} (seed {style['seed']})"))
+    while len(slots) < 2 * VIDEO_AUGMENT_MAX_STYLES:
+        slots.append(hidden)
+    out["slots"] = slots
+
+    try:
+        zip_path = shutil.make_archive(str(run_dir), "zip", run_dir)
+        out["download"] = gr.update(value=zip_path)
+    except OSError as exc:
+        logger.warning("augment zip failed: %s", exc)
+
+    t = prov.get("timings_s", {})
+    out["status"] = (f"**done** · {prov['n_frames']} frames × "
+                     f"{len(prov['styles'])} style(s) · "
+                     f"depth {t.get('depth', 0):.1f} s · "
+                     f"diffusion {t.get('diffusion', 0):.1f} s · "
+                     f"restyled frac "
+                     f"{sum(prov['restyle_frac_per_frame']) / max(1, len(prov['restyle_frac_per_frame'])):.2f}"
+                     f" · `{run_dir}`")
+    yield tup()
 
 
 # ------------------------------------------------------------------ on_timer
