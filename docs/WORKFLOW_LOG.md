@@ -118,4 +118,45 @@ Decisions frozen into `sceneforge.yaml`: conditioning level **L0** (SDXL-Lightni
 - **gemma4:e4b echoing the few-shot example**: live validation showed the planner repeats the example verbatim when the user task matches it — the director agent switched the few-shot to a workbench task so the demo's kitchen prompt can never collide.
 - **Cross-agent test staleness**: M1 legitimately froze `s_per_img=0.75` into the yaml after the core agent had asserted it was null — the orchestrating agent reconciled the test to the post-M1 semantics. One agent's "done" is another agent's input; contracts in the architecture doc kept these collisions rare and shallow.
 
-*(Integration phase — orchestrator + Gradio UI — recorded below.)*
+---
+
+## Phase 4 — Interface Encapsulation and Finalization (2026-06-10)
+
+### Orchestration pattern: integrator → adversarial verifier
+
+A single **integrator agent** built the final layer against the frozen contracts (`orchestrator.py` demo-paced event pipeline, full Gradio Blocks UI with streamed planner tokens / Model3D viewer / live-filling gallery / re-forge sliders / COCO export, `app.py` with pre-warm), validated one real forge on GPU, then handed off to an **adversarial verifier agent** instructed to break the app the way a live demo would. Eight drills:
+
+| Drill | Result |
+|---|---|
+| Full test suite | 189 tests green |
+| Cold-start forge (new task, 2×3) | PASS — all artifacts, COCO round-trips, fidelity 0.81 |
+| **Ollama-dead fallback** (LLM server unreachable) | PASS — forge completes via deterministic fallback, zero exceptions |
+| Re-forge (camera+seed change, no LLM) | PASS — 1.7 s vs 6 s budget; labels track the moved camera; zero Ollama traffic |
+| Gradio UI driven via API | PASS after a fix (below); full forge through the UI, streaming works |
+| Edge prompts (unicorn/cloud-castle, 8-object stress) | PASS — RAG floor routes nonsense to `box`; collision resolver drops 1 object with a logged entry |
+| Determinism | geometry/fallback/seed-law byte-identical; LLM plans not reproducible across fresh processes (Ollama server-side prefix-cache nondeterminism — documented caveat, not an app bug) |
+| VRAM hygiene (consecutive forges) | PASS — free-VRAM delta +0.00 GB; GPU returns to desktop baseline on exit |
+
+**Demo-breaking bug found and fixed by the verifier:** `on_forge` → `on_reforge` from the real UI crashed with `eglMakeCurrent EGL_BAD_ACCESS` — pyrender 0.1.45 leaves its EGL context current on the last render thread (`make_uncurrent` is a no-op `pass` upstream) and Gradio 6 hops worker threads per event. Fix: serialize renders behind a lock and explicitly unbind the EGL context after every render, plus a cross-thread regression test. This is exactly the class of bug that only appears under the real UI's threading model — unit tests and direct pipeline runs could never have caught it.
+
+**Measured performance (RTX 3090):** warm 2-layout × 4-style forge **35.8 s** end-to-end (budget 66 s) · diffusion 0.75 s/img raw, 1.63 s/img wall · re-forge **1.7 s** · first visual 12.8 s (planner LLM dominates; tokens stream to the UI from ~1 s so it is never silent) · pipeline construction 17–22 s, hidden by `app.py` pre-warm · peak VRAM 11.6 GB reserved, min free 10.8 GB.
+
+### Deliverables (agent-produced, human-verified)
+
+Two final parallel agents produced the README (166 lines, with the measured numbers and an honest limitations section) and the demonstration materials — captured from a **real live session**: a Playwright-driven browser recorded a 74-second video of the actual demo flow (type task → FORGE → planner tokens stream → 3D layout + depth control appear → 8-image gallery fills live → mask overlay toggle → camera re-forge in 1.8 s → COCO export), plus three verified screenshots (`docs/img/`). Measured in the recorded session: 41 s click-to-done for 2 layouts × 4 styles, fidelity match_rate 97%, 8/8 images kept.
+
+### Submission
+
+- Public GitHub repository: https://github.com/kmliy901054/sceneforge (source, README.md, this workflow log, architecture doc, M1 experiment report, demo materials)
+- Demo video: `docs/demo/demo_raw.mp4` (also submitted as `314831017_HW7.mp4`)
+
+### Final tally of the agentic build
+
+| Phase | Agents | What they did |
+|---|---|---|
+| 1 Ideation | 20 | 5 grounded proposals × 3-lens judge panel; human picked SceneForge |
+| 2 Architecture | 5 | architect → 3 adversarial reviewers (38 issues, many verified live on-machine) → finalizer |
+| 3 Implementation | 7 | 6 parallel module agents + M1 go/no-go GPU experiment (gate passed 0.911/0.923) |
+| 4 Integration | 2 | integrator → adversarial verifier (8 drills; found+fixed the EGL thread-hop demo-breaker) |
+| Deliverables | 2 | README writer + Playwright demo capture |
+| **Total** | **36 sub-agents** | orchestrated by one lead agent (Claude Code, Fable 5) across ~2M sub-agent tokens, in one day |
