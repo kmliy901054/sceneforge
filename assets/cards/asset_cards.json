@@ -1,0 +1,122 @@
+[
+  {
+    "asset_id": "mug",
+    "name": "mug",
+    "description": "A ceramic coffee mug with a cylindrical body and a loop handle on one side.",
+    "synonyms": ["coffee mug", "coffee cup", "mug with handle", "tea mug", "something to drink coffee from"],
+    "affordances": ["pick up", "grasp by handle", "pour into", "drink from"],
+    "nominal_height_m": 0.095
+  },
+  {
+    "asset_id": "bowl",
+    "name": "bowl",
+    "description": "A round open-top bowl with curved walls for holding food or liquid.",
+    "synonyms": ["soup bowl", "cereal bowl", "mixing bowl", "dish for soup", "something to eat cereal from"],
+    "affordances": ["pick up", "fill", "pour into", "hold food"],
+    "nominal_height_m": 0.055
+  },
+  {
+    "asset_id": "plate",
+    "name": "plate",
+    "description": "A flat round dinner plate with a shallow raised rim.",
+    "synonyms": ["dinner plate", "dish", "flat dish", "saucer", "something to serve food on"],
+    "affordances": ["pick up", "place food on", "stack", "serve from"],
+    "nominal_height_m": 0.02
+  },
+  {
+    "asset_id": "cup",
+    "name": "cup",
+    "description": "A handle-less drinking cup shaped like a truncated cone, wider at the top.",
+    "synonyms": ["drinking cup", "tumbler", "paper cup", "drinking glass", "something to drink from"],
+    "affordances": ["pick up", "fill", "drink from", "pour from"],
+    "nominal_height_m": 0.11
+  },
+  {
+    "asset_id": "bottle",
+    "name": "bottle",
+    "description": "A tall bottle with a cylindrical body, tapered shoulder, narrow neck and a screw cap.",
+    "synonyms": ["water bottle", "drink bottle", "soda bottle", "flask", "something to drink water from"],
+    "affordances": ["pick up", "grasp", "pour from", "unscrew cap"],
+    "nominal_height_m": 0.24
+  },
+  {
+    "asset_id": "can",
+    "name": "can",
+    "description": "A small cylindrical aluminum beverage can.",
+    "synonyms": ["soda can", "drink can", "tin can", "aluminum can", "canned drink"],
+    "affordances": ["pick up", "grasp", "shake", "open"],
+    "nominal_height_m": 0.115
+  },
+  {
+    "asset_id": "box",
+    "name": "box",
+    "description": "A rectangular cardboard box, a plain cuboid container.",
+    "synonyms": ["cardboard box", "carton", "package", "parcel", "rectangular container"],
+    "affordances": ["pick up", "push", "stack", "open"],
+    "nominal_height_m": 0.08
+  },
+  {
+    "asset_id": "book",
+    "name": "book",
+    "description": "A closed hardcover book, a flat rectangular slab lying on the table.",
+    "synonyms": ["hardcover book", "novel", "textbook", "paperback", "something to read"],
+    "affordances": ["pick up", "open", "read", "stack"],
+    "nominal_height_m": 0.03
+  },
+  {
+    "asset_id": "pan",
+    "name": "pan",
+    "description": "A shallow frying pan with a wide round dish and a long straight handle.",
+    "synonyms": ["frying pan", "skillet", "saute pan", "cooking pan", "something to fry eggs in"],
+    "affordances": ["pick up by handle", "cook in", "pour from"],
+    "nominal_height_m": 0.04
+  },
+  {
+    "asset_id": "ball",
+    "name": "ball",
+    "description": "A small solid sphere the size of a tennis ball.",
+    "synonyms": ["sphere", "toy ball", "tennis ball", "round object", "something to throw"],
+    "affordances": ["pick up", "roll", "throw"],
+    "nominal_height_m": 0.1
+  },
+  {
+    "asset_id": "pot",
+    "name": "pot",
+    "description": "A deep cylindrical cooking pot with two short stub handles on the sides.",
+    "synonyms": ["cooking pot", "saucepan", "stock pot", "stew pot", "something to boil water in"],
+    "affordances": ["pick up by handles", "fill", "cook in", "stir in"],
+    "nominal_height_m": 0.12
+  },
+  {
+    "asset_id": "screwdriver",
+    "name": "screwdriver",
+    "description": "A screwdriver with a thick grip handle and a long thin metal shaft, lying flat.",
+    "synonyms": ["flathead screwdriver", "phillips screwdriver", "driver", "hand tool", "tool to turn screws"],
+    "affordances": ["pick up", "grasp by handle", "turn screws"],
+    "nominal_height_m": 0.03
+  },
+  {
+    "asset_id": "hammer",
+    "name": "hammer",
+    "description": "A hammer with a straight handle and a heavy crossways head, lying flat.",
+    "synonyms": ["claw hammer", "mallet", "hand tool", "tool to drive nails", "something to hammer with"],
+    "affordances": ["pick up by handle", "strike", "drive nails"],
+    "nominal_height_m": 0.032
+  },
+  {
+    "asset_id": "cutting_board",
+    "name": "cutting board",
+    "description": "A flat rectangular wooden cutting board.",
+    "synonyms": ["chopping board", "cutting surface", "bread board", "butcher block", "board to chop vegetables on"],
+    "affordances": ["place items on", "chop on", "carry"],
+    "nominal_height_m": 0.018
+  },
+  {
+    "asset_id": "laptop",
+    "name": "laptop",
+    "description": "An open laptop computer with a flat keyboard base and a tilted screen lid.",
+    "synonyms": ["notebook computer", "laptop computer", "portable computer", "macbook", "something to type on"],
+    "affordances": ["pick up", "open lid", "type on", "close"],
+    "nominal_height_m": 0.216
+  }
+]

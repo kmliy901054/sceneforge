@@ -94,6 +94,28 @@ Environment prep (background, agent-driven): EGL headless render test passed (`E
 
 ### Orchestration pattern: parallel module agents against a frozen contract
 
-Because ARCHITECTURE.md fixes every interface (exact file tree, function signatures, data contracts), six implementation agents were launched **in parallel**, each owning a disjoint set of files (spec/config/compat · asset builders · placement/compose · render backend · LLM director · labels/gpu), each writing and running its own unit tests. The M1 go/no-go harness ran as a separate GPU-bound agent once model downloads completed.
+Because ARCHITECTURE.md fixes every interface (exact file tree, function signatures, data contracts), six implementation agents were launched **in parallel**, each owning a disjoint set of files (spec/config/compat · asset builders · placement/compose · render backend · LLM director · labels/gpu), each writing and running its own unit tests. The M1 go/no-go harness ran as a separate GPU-bound agent in parallel, gated on model downloads.
 
-*(Results recorded below as milestones complete.)*
+### Result: all 7 agents green — 182 unit tests passing, zero module failures
+
+### M1 go/no-go: the load-bearing assumption is TRUE, with a wide margin
+
+The make-or-break experiment (12 synthetic scenes × OWLv2 detection vs renderer ground truth, full report in [`m1_report.md`](m1_report.md), evidence grids in `outputs/m1/`):
+
+| Metric | Gate | Measured |
+|---|---|---|
+| match_rate (IoU ≥ 0.5) | ≥ 0.70 | **0.911** |
+| mean matched IoU | ≥ 0.65 | **0.923** |
+| hallucination rate | (report) | 0.067 |
+| seconds / image @768² | est. 2–2.5 | **0.75** (3× faster than estimated) |
+
+Decisions frozen into `sceneforge.yaml`: conditioning level **L0** (SDXL-Lightning 4-step UNet, cfg=0, cond_scale=0.85), depth mode **disparity** (tied with linear on IoU but 2× lower hallucination), VRAM mode **sequential** (co-resident measured at 0.92 GB min-free < 3.0 GB guard — correctly rejected by the rule the reviewers designed). 45/45 GT instances were gate-eligible; metrics reproduced exactly across two runs.
+
+### Bottlenecks hit and resolved by agents during implementation
+
+- **HF Xet downloads silently stalling** (dead connections, 0–5 MB/s): the M1 agent killed the stalled downloaders, deleted partial blobs, re-downloaded over plain HTTP with `HF_HUB_DISABLE_XET=1` at 35–99 MB/s, then **sha256-verified every large blob** against LFS etags.
+- **ROS Jazzy contaminates pytest**: `/opt/ros/jazzy` site-packages on `PYTHONPATH` injects a broken `launch_testing` plugin (`ModuleNotFoundError: lark`) that crashes test collection. Standardized via `scripts/run_tests.sh` (`PYTHONPATH= PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`).
+- **gemma4:e4b echoing the few-shot example**: live validation showed the planner repeats the example verbatim when the user task matches it — the director agent switched the few-shot to a workbench task so the demo's kitchen prompt can never collide.
+- **Cross-agent test staleness**: M1 legitimately froze `s_per_img=0.75` into the yaml after the core agent had asserted it was null — the orchestrating agent reconciled the test to the post-M1 semantics. One agent's "done" is another agent's input; contracts in the architecture doc kept these collisions rare and shallow.
+
+*(Integration phase — orchestrator + Gradio UI — recorded below.)*

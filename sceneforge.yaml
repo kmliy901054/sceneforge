@@ -1,0 +1,38 @@
+# SceneForge runtime config (ARCHITECTURE.md §2, loaded by sceneforge/config.py).
+# Precedence: code defaults < this file < SCENEFORGE_<SECTION>_<FIELD> env vars.
+# M1 freezes its measured decisions here: gen.level, gen.depth_mode,
+# gen.s_per_img (measured s/img at the chosen level) and vram.mode (§7.4, §13).
+
+gen:
+  resolution: 768
+  steps: 4
+  guidance_scale: 0.0          # CFG iff > 1; negative_prompt dead at Lightning cfg=0
+  cond_scale: 0.85
+  control_guidance_end: 0.9
+  level: L0                    # conditioning ladder L0..L4 (§7.4); M1 may walk up
+  depth_mode: disparity        # MiDaS-style 1/z (§7.3); "linear" = legacy A/B arm
+  s_per_img: 0.75              # MEASURED by M1; downstream budgets use this number
+
+vram:
+  mode: sequential             # expected default; "coresident" only if M1 verifies
+  guard_gb: 3.0                # ONE constant for mode-pick rule AND runtime guard
+
+eval:
+  keep_threshold: 0.45         # quarantine if fidelity_adj < this (§9)
+  detect_threshold: 0.15       # OWLv2 post_process_object_detection threshold
+  halluc_threshold: 0.3        # hallucination: score >= 0.3 and IoU < 0.3 vs all GT
+  min_gate_area_px: 1000       # gate stats over GT instances with area_px >= this
+
+ollama:
+  host: http://localhost:11434
+  planner_model: gemma4:e4b
+  quality_model: qwen3.5:27b   # ALWAYS keep_alive=0; enforced GPU swap (§10.4)
+  embed_model: embeddinggemma
+  num_ctx: 4096                # standardized for ALL gemma calls (§6.1)
+  keep_alive: 5m               # director chats; server runs OLLAMA_KEEP_ALIVE=-1!
+
+paths:                         # relative entries resolve against the repo root
+  runs_dir: outputs/runs
+  cards_file: assets/cards/asset_cards.json
+  glb_dir: assets/glb
+  embed_cache: assets/index/embed_cache.npz
