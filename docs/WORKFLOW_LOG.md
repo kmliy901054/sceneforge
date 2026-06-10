@@ -67,8 +67,33 @@ A second workflow spawned a **lead-architect agent** to produce an implementatio
 2. **Data-contract & correctness reviewer** — walked every byte from SceneSpec to COCO zip; specifically tasked with verifying what depth representation `controlnet-depth-sdxl-1.0` was trained on, pyrender `RenderFlags.SEG` instance-mask mechanics, and COCO format validity
 3. **Scope & demo reviewer** — hunted hidden time sinks and defined the minimal lovable demo path
 
-A finalizer agent merged the critiques into [`ARCHITECTURE.md`](ARCHITECTURE.md) and the milestone checklist [`TASKS.md`](TASKS.md).
+A finalizer agent merged the critiques into [`ARCHITECTURE.md`](ARCHITECTURE.md) (v1.1, 701 lines) and the milestone checklist [`TASKS.md`](TASKS.md).
 
-*(Results recorded below when the workflow completes.)*
+### Outcome: 38 issues found; the reviewers verified claims *live on the machine*
 
-In parallel, the environment-prep pipeline ran in the background: EGL headless-rendering smoke test + ~13 GB of fp16 model downloads (SDXL base, depth ControlNet, VAE-fp16-fix, SDXL-Lightning 4-step UNet+LoRA, OWLv2).
+The adversarial reviewers did not just read the design — they ran commands against the real environment and falsified several assumptions that would each have cost hours at implementation time:
+
+| Bottleneck found by agents | Resolution baked into the architecture |
+|---|---|
+| `transformers` 5.10.2 crashes on torch 2.6 (`torch.float8_e8m0fnu` needs torch≥2.7) — both OWLv2 and the SDXL ControlNet pipeline imports die | P0: pin `transformers==4.51.3` |
+| Ollama 0.20.3 grammar-enforces JSON *structure/types* but **not numeric min/max** (verified: first live planner response emitted `elevation_deg: 0` against `ge=10`) | `clamp_to_bounds()` coerces numeric ranges deterministically *before* pydantic validation; the LLM repair loop handles only structural errors |
+| Ollama server runs `OLLAMA_KEEP_ALIVE=-1` — any request omitting `keep_alive` pins its model in VRAM forever | every Ollama call passes explicit `keep_alive`; phase-barrier `ollama_unload()` sweeps `/api/ps` |
+| `/api/generate` returns HTTP 400 for embedding models — the naive unload helper would eat a 15 s timeout every burst | unload embedding models via `/api/embed` with `keep_alive=0` (verified working) |
+| pyrender `Scene.from_trimesh_scene` **drops node names** (verified in source), silently breaking `seg_node_map` instance masks | build the pyrender scene manually, retaining `Node` handles |
+| Co-resident VRAM budget was 1–2 GB optimistic once measured (gemma4:e4b = 10.88 GB resident with KV cache, not 9.6 GB file size; free = 11.9 GiB < 12–13.5 GiB needed) | sequential mode is the expected default; co-resident demoted to an M1-verified bonus |
+| `controlnet-depth-sdxl-1.0` was trained on MiDaS-style *inverse* depth (disparity), not a linear flip | `depth_prep.py` defaults to percentile-normalized disparity, with an M1 A/B test |
+| pyrender 0.1.45 uses `np.infty`, removed in numpy 2.0 | `compat.py` shim (`np.infty = np.inf`) imported first everywhere |
+
+Key architecture decisions (full rationale in ARCHITECTURE.md §12): procedural trimesh asset builders instead of downloaded mesh packs (depth silhouettes are all ControlNet sees); a two-layer LLM contract (strict LLM-facing schema → resolved `SceneSpec`); server-pinned camera `look_at`/`yfov` so the LLM can never empty every mask; M1 as a self-contained quantitative go/no-go (gate: `match_rate(IoU≥0.5) ≥ 0.70` and `mean_matched_iou ≥ 0.65`) with an L0→L4 conditioning ladder; every LLM-touching path has a deterministic fallback so the demo completes even with Ollama stopped.
+
+---
+
+## Phase 3 — Code Generation and Implementation (2026-06-10 →)
+
+Environment prep (background, agent-driven): EGL headless render test passed (`EGL_OK`, valid depth buffer); ~13 GB of fp16 weights downloaded (SDXL base, depth ControlNet, VAE-fp16-fix, SDXL-Lightning 4-step UNet+LoRA, OWLv2); `transformers` pinned to 4.51.3 per P0.
+
+### Orchestration pattern: parallel module agents against a frozen contract
+
+Because ARCHITECTURE.md fixes every interface (exact file tree, function signatures, data contracts), six implementation agents were launched **in parallel**, each owning a disjoint set of files (spec/config/compat · asset builders · placement/compose · render backend · LLM director · labels/gpu), each writing and running its own unit tests. The M1 go/no-go harness ran as a separate GPU-bound agent once model downloads completed.
+
+*(Results recorded below as milestones complete.)*
