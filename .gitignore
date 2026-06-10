@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+outputs/
+*.egg-info/
+.gradio/
+flagged/
