@@ -57,6 +57,20 @@ LIGHTNING_REPO = "ByteDance/SDXL-Lightning"
 LIGHTNING_UNET = "sdxl_lightning_4step_unet.safetensors"
 LIGHTNING_LORA = "sdxl_lightning_4step_lora.safetensors"
 
+#: IP-Adapter style-reference weights (h94/IP-Adapter, SDXL ViT-H variant).
+#: The vit-h adapter (sdxl_models/ip-adapter_sdxl_vit-h.safetensors, ~698 MB)
+#: pairs with the laion CLIP-ViT-H-14 image encoder that h94/IP-Adapter hosts
+#: under models/image_encoder (~2.5 GB) — NOT sdxl_models/image_encoder, which
+#: is the ViT-bigG encoder for the plain ip-adapter_sdxl weights. Because
+#: IP_ADAPTER_ENCODER_FOLDER contains a "/", diffusers' load_ip_adapter()
+#: treats it as a repo-root-relative path (verified against diffusers 0.38
+#: loaders/ip_adapter.py: `image_encoder_folder.count("/") == 0` selects the
+#: subfolder-relative branch, otherwise the path is used as-is).
+IP_ADAPTER_REPO = "h94/IP-Adapter"
+IP_ADAPTER_SUBFOLDER = "sdxl_models"
+IP_ADAPTER_WEIGHT = "ip-adapter_sdxl_vit-h.safetensors"
+IP_ADAPTER_ENCODER_FOLDER = "models/image_encoder"
+
 
 class ForgePipeline:
     """Load/generate/unload wrapper around StableDiffusionXLControlNetPipeline.
@@ -67,6 +81,8 @@ class ForgePipeline:
         offloaded: True once enable_model_cpu_offload() has run (V3).
         force_sequential: latched True after any caught OOM — the session must
             run cfg.vram.mode="sequential" from then on (§7.5 side effects).
+        style_ref/style_scale: active IP-Adapter style reference (PIL image +
+            scale) set by enable_style_reference(); None/0.0 when disabled.
     """
 
     def __init__(self, device: str = "cuda", resolution: int = 768) -> None:
@@ -77,6 +93,10 @@ class ForgePipeline:
         self.offloaded = False
         self.force_sequential = False
         self._min_free_bytes: int | None = None
+        # IP-Adapter style-reference state (enable_style_reference()).
+        self.style_ref: Image.Image | None = None
+        self.style_scale: float = 0.0
+        self._ip_loaded = False
 
     # ------------------------------------------------------------------ load
     def load(self, level: int = 0) -> None:
@@ -139,7 +159,75 @@ class ForgePipeline:
         self.pipe = pipe
         self.level = level
         self.offloaded = False
+        self._ip_loaded = False  # fresh UNet — any prior IP-Adapter is gone
         self.reset_peak()
+        if self.style_ref is not None:
+            # A style reference survives pipeline rebuilds (level changes):
+            # re-install the IP-Adapter onto the NEW UNet. This must happen
+            # here, AFTER the Lightning UNet swap above — see
+            # enable_style_reference() for the load-order contract.
+            self.enable_style_reference(self.style_ref, self.style_scale)
+
+    # ------------------------------------------------------- style reference
+    def enable_style_reference(self, image: Image.Image, scale: float = 0.6) -> None:
+        """Enable IP-Adapter style transfer from ONE reference image.
+
+        Every subsequent generate() passes ``ip_adapter_image=image`` so the
+        output follows the reference's visual style ON TOP of the text prompt
+        (the LLM-written style prompt still drives content/wording; ``scale``
+        balances image- vs text-conditioning — 0.0 is text-only, ~0.6 is a
+        good style transfer default, 1.0+ lets the reference dominate).
+
+        LOAD ORDER (verified against diffusers 0.38 loaders/ip_adapter.py):
+        ``load_ip_adapter()`` installs IPAdapterAttnProcessor2_0 modules and an
+        ``encoder_hid_proj`` image-projection head into ``pipe.unet`` AT CALL
+        TIME. ForgePipeline.load() replaces ``pipe.unet`` with the Lightning
+        4-step UNet AFTER ``from_pretrained``, so this method must run AFTER
+        load() — calling it first would install the adapter on the discarded
+        base UNet. load() therefore resets ``_ip_loaded`` and re-applies an
+        active reference whenever it rebuilds the pipeline. The L2 fused-LoRA
+        path is unaffected: load_lora_weights/fuse_lora touch linear weights,
+        not attention processors, so IP-Adapter stacks cleanly on top.
+
+        The adapter weights are loaded once per pipeline build; repeated calls
+        only swap the reference image / scale (set_ip_adapter_scale).
+        """
+        if self.pipe is None:
+            raise RuntimeError(
+                "enable_style_reference() before load(level) — load_ip_adapter "
+                "must target the final (Lightning-swapped) UNet")
+        if not self._ip_loaded:
+            logger.info("loading IP-Adapter %s/%s (%s)", IP_ADAPTER_REPO,
+                        IP_ADAPTER_WEIGHT, IP_ADAPTER_ENCODER_FOLDER)
+            self.pipe.load_ip_adapter(
+                IP_ADAPTER_REPO,
+                subfolder=IP_ADAPTER_SUBFOLDER,
+                weight_name=IP_ADAPTER_WEIGHT,
+                image_encoder_folder=IP_ADAPTER_ENCODER_FOLDER,
+            )
+            self._ip_loaded = True
+        self.pipe.set_ip_adapter_scale(float(scale))
+        self.style_ref = image.convert("RGB")
+        self.style_scale = float(scale)
+
+    def disable_style_reference(self) -> None:
+        """Drop the style reference and restore stock attention processors.
+
+        diffusers 0.38 ``unload_ip_adapter()`` removes the CLIP image encoder
+        + feature extractor, clears ``unet.encoder_hid_proj`` and swaps the
+        IPAdapter attention processors back to AttnProcessor2_0 — generation
+        without a reference is bit-identical to a never-enabled pipeline.
+        Safe to call when nothing is enabled (no-op).
+        """
+        self.style_ref = None
+        self.style_scale = 0.0
+        if self.pipe is not None and self._ip_loaded:
+            self.pipe.unload_ip_adapter()
+        self._ip_loaded = False
+
+    @property
+    def style_reference_enabled(self) -> bool:
+        return self.style_ref is not None
 
     # -------------------------------------------------------------- generate
     def generate(
@@ -210,6 +298,12 @@ class ForgePipeline:
         # If resolution dropped to 640 (V4), diffusers' image processor scales
         # the control internally; the orchestrator should re-render depth at
         # 640 for subsequent frames to honor the never-resize contract (§7.3).
+        extra: dict[str, Any] = {}
+        if self.style_ref is not None:
+            # IP-Adapter style reference — ONLY pass the kwarg when enabled:
+            # an un-adapted pipeline rejects ip_adapter_image (no image
+            # encoder / encoder_hid_proj registered).
+            extra["ip_adapter_image"] = self.style_ref
         result = self.pipe(
             prompt=prompt,
             negative_prompt=negative,
@@ -223,6 +317,7 @@ class ForgePipeline:
             height=height,
             generator=generator,
             callback_on_step_end=self._step_callback,
+            **extra,
         )
         self._sample_free()
         return result.images[0]
@@ -263,10 +358,15 @@ class ForgePipeline:
 
     # --------------------------------------------------------------- unload
     def unload(self) -> None:
-        """Drop all refs and return VRAM to the driver (§7.5)."""
+        """Drop all refs and return VRAM to the driver (§7.5).
+
+        An active style reference (``style_ref``) is kept so the next load()
+        re-installs the IP-Adapter; call disable_style_reference() to clear it.
+        """
         self.pipe = None
         self.level = None
         self.offloaded = False
+        self._ip_loaded = False  # adapter weights died with the pipe
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

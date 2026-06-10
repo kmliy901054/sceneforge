@@ -165,4 +165,6 @@ Robot-learning datasets are mostly video episodes, so v2 extended SceneForge bey
 | 3 Implementation | 7 | 6 parallel module agents + M1 go/no-go GPU experiment (gate passed 0.911/0.923) |
 | 4 Integration | 2 | integrator → adversarial verifier (8 drills; found+fixed the EGL thread-hop demo-breaker) |
 | Deliverables | 2 | README writer + Playwright demo capture |
-| **Total** | **36 sub-agents** | orchestrated by one lead agent (Claude Code, Fable 5) across ~2M sub-agent tokens, in one day |
+| 5 v2 robot-data tools | 6 | dedicated agents for the frame restyler, LeRobot dataset I/O, view sweep, and Video Augment tab, plus on-GPU validation and a gradio_client UI drive (tests 189 → 229) |
+| 6 Visuals & docs | 1 | hero GIF cut from the live capture, rendered architecture diagram (graphviz), README/docs staleness pass |
+| **Total** | **43 sub-agents** | orchestrated by one lead agent (Claude Code, Fable 5) across ~2M+ sub-agent tokens, over two days |

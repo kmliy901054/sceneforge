@@ -12,6 +12,9 @@ Forge tab layout map:
 
     Row: task box · FORGE
     Row: layouts/styles/seed controls
+    Accordion (collapsed): style reference image + IP-Adapter scale slider —
+         optional; the LLM prompts still drive content, the reference ADDS
+         its visual style on top (sceneforge.diffusion.pipeline, vit-h)
     Row: stage status line (updates on EVERY event — the UI is never silent)
     Row: [ Model3D viewer + depth control + Re-Forge accordion ]
          [ planner token stream (Code) + SceneSpec JSON + source line ]
@@ -52,6 +55,17 @@ def _build_forge_tab(run_state: gr.State) -> None:
         n_layouts = gr.Slider(1, 4, value=2, step=1, label="layouts")
         n_styles = gr.Slider(2, 6, value=4, step=1, label="styles")
         seed = gr.Number(value=42, precision=0, label="seed")
+
+    # Optional IP-Adapter style reference (h94/IP-Adapter, SDXL vit-h). The
+    # LLM still writes the per-style text prompts; the reference image ADDS
+    # its visual style on top during diffusion (scale 0 = text only).
+    with gr.Accordion("Style reference 🎨 (optional, IP-Adapter)", open=False):
+        style_ref_img = gr.Image(
+            label="style reference (optional)", type="pil",
+            sources=["upload", "clipboard"], height=220)
+        style_scale_sl = gr.Slider(
+            0.0, 1.5, value=get_config().gen.ip_adapter_scale, step=0.05,
+            label="style strength (IP-Adapter scale)")
 
     status_md = gr.Markdown("**ready** — enter a task and hit FORGE")
 
@@ -106,7 +120,8 @@ def _build_forge_tab(run_state: gr.State) -> None:
     # ------------------------------------------------------------ events
     forge_btn.click(
         handlers.on_forge,
-        inputs=[task_tb, n_layouts, n_styles, seed, overlay_radio],
+        inputs=[task_tb, n_layouts, n_styles, seed, overlay_radio,
+                style_ref_img, style_scale_sl],
         outputs=[status_md, plan_stream, spec_json, source_md, layout_3d,
                  control_img, gallery, fidelity_lbl, style_dd, run_state,
                  download],

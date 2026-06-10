@@ -12,6 +12,7 @@ gen:
   level: L0                    # conditioning ladder L0..L4 (§7.4); M1 may walk up
   depth_mode: disparity        # MiDaS-style 1/z (§7.3); "linear" = legacy A/B arm
   s_per_img: 0.75              # MEASURED by M1; downstream budgets use this number
+  ip_adapter_scale: 0.6        # IP-Adapter style-reference strength (0 = text only)
 
 vram:
   mode: sequential             # expected default; "coresident" only if M1 verifies

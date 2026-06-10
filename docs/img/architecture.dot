@@ -1,0 +1,96 @@
+// SceneForge pipeline diagram — render with:
+//   dot -Tpng -Gdpi=150 docs/img/architecture.dot -o docs/img/architecture.png
+digraph sceneforge {
+  rankdir=TB;
+  bgcolor="white";
+  fontname="Helvetica";
+  fontsize=12;
+  pad="0.3";
+  nodesep=0.45;
+  ranksep=0.45;
+  splines=true;
+
+  node [
+    shape=box, style="rounded,filled", fontname="Helvetica",
+    fontsize=11, color="#37474f", fontcolor="#212121",
+    fillcolor="#ffffff", penwidth=1.2, margin="0.22,0.14"
+  ];
+  edge [
+    fontname="Helvetica", fontsize=10, color="#455a64",
+    fontcolor="#37474f", penwidth=1.2, arrowsize=0.8
+  ];
+
+  task [
+    group="main",
+    label="task: \"pick the red mug from a cluttered kitchen table\"",
+    shape=plaintext, fillcolor="transparent", fontsize=12,
+    fontcolor="#212121", margin="0,0"
+  ];
+
+  director [
+    group="main",
+    label=<<b>Director&nbsp;LLM</b>&nbsp;&nbsp;<font point-size="9" color="#607d8b">CPU · Ollama</font><br align="left"/><font point-size="10">gemma4:e4b — schema-constrained JSON plan<br align="left"/>clamp → pydantic validate → repair loop → fallback<br align="left"/>RAG grounding: embeddinggemma over asset cards<br align="left"/></font>>,
+    fillcolor="#e8eaf6"
+  ];
+
+  spec [
+    group="main",
+    label=<<b>SceneSpec</b><br/><font point-size="10">the validated contract (pydantic)</font>>,
+    shape=note, fillcolor="#fff8e1", color="#bf9b30"
+  ];
+
+  engine [
+    group="main",
+    label=<<b>Scene&nbsp;Engine</b>&nbsp;&nbsp;<font point-size="9" color="#607d8b">CPU · EGL headless</font><br align="left"/><font point-size="10">procedural trimesh builders → collision-resolved placement<br align="left"/>pyrender: depth z-buffer + pixel-perfect SEG instance masks<br align="left"/>→ depth16 · masks/boxes · viewer.glb · control image<br align="left"/></font>>,
+    fillcolor="#e0f2f1"
+  ];
+
+  diffusion [
+    group="main",
+    label=<<b>Diffusion</b>&nbsp;&nbsp;<font point-size="9" color="#607d8b">GPU · phase-gated</font><br align="left"/><font point-size="10">SDXL-base fp16 + depth-ControlNet<br align="left"/>SDXL-Lightning 4-step distilled UNet, cfg = 0<br align="left"/>same geometry → N photoreal style worlds (0.75 s/img)<br align="left"/></font>>,
+    fillcolor="#fce4ec"
+  ];
+
+  labels [
+    group="main",
+    label=<<b>Labels</b>&nbsp;&nbsp;<font point-size="9" color="#607d8b">CPU</font><br align="left"/><font point-size="10">identity transfer — every image inherits its layout's masks<br align="left"/>overlays · COCO RLE writer · RGB-D (depth16 + cameras.json) · zip<br align="left"/></font>>,
+    fillcolor="#f1f8e9"
+  ];
+
+  eval [
+    group="main",
+    label=<<b>Eval</b>&nbsp;&nbsp;<font point-size="9" color="#607d8b">GPU</font><br align="left"/><font point-size="10">OWLv2 open-vocab spot-check of every image<br align="left"/>per-instance recall IoU + hallucination → auto-quarantine<br align="left"/></font>>,
+    fillcolor="#fffde7"
+  ];
+
+  ui [
+    label=<<b>UI&nbsp;—&nbsp;Gradio</b><br align="left"/><font point-size="10">FORGE · streamed spec<br align="left"/>3D viewer · style gallery<br align="left"/>re-forge sliders · export<br align="left"/>Video Augment tab<br align="left"/>stage status + VRAM footer<br align="left"/></font>>,
+    fillcolor="#eceff1", style="rounded,filled,dashed"
+  ];
+
+  vram [
+    label=<<b>VRAM&nbsp;phase&nbsp;orchestration</b><br align="left"/><font point-size="10">one 24 GB GPU, time-shared:<br align="left"/>10.9 GB Ollama LLM ⇄ 11.6 GB SDXL<br align="left"/>gpu.phase("diffusion") sweeps Ollama<br align="left"/>out of VRAM before SDXL loads;<br align="left"/>OOM-recovery ladder if it still trips<br align="left"/></font>>,
+    shape=note, fillcolor="#fafafa", color="#90a4ae", style="filled,dashed"
+  ];
+
+  // main pipeline
+  task -> director;
+  director -> spec;
+  spec -> engine;
+  engine -> diffusion [label="  depth control image"];
+  diffusion -> labels [label="  label transfer is a no-op"];
+  labels -> eval;
+
+  // swimlane note (GPU residency) — governs the two heavy phases
+  vram -> director [style=dashed, dir=none, color="#90a4ae"];
+  vram -> diffusion [constraint=false, style=dashed, dir=none, color="#90a4ae"];
+
+  // UI taps into the pipeline from the side
+  ui -> director [constraint=false, style=dashed, dir=back, color="#78909c", label="  spec stream"];
+  ui -> engine [constraint=false, style=dashed, dir=back, color="#78909c", label="  3D viewer (GLB)"];
+  ui -> labels [constraint=false, style=dashed, dir=back, color="#78909c", label="  gallery · dataset.zip"];
+
+  // keep side columns beside the pipeline
+  { rank=same; vram; director; }
+  { rank=same; engine; ui; }
+}

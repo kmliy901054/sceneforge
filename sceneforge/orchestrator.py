@@ -230,6 +230,8 @@ class ForgeRun:
         n_layouts: int = 2,
         n_styles: int = 4,
         seed: int = 42,
+        style_ref: Optional[Image.Image] = None,
+        style_ref_scale: Optional[float] = None,
     ) -> Iterator[ForgeEvent]:
         """Run one forge end-to-end, yielding §4.8 events in the §1 demo order.
 
@@ -238,14 +240,26 @@ class ForgeRun:
         → ``layout``(1..) → ``image``\\ * (PINNED layout-major) → ``fidelity``
         → ``done``. Recoverable per-layout failures emit ``error`` events and
         skip the layout; a fatal failure emits a final ``error`` event.
+
+        ``style_ref``: optional PIL style-reference image. PRECEDENCE: the LLM
+        still writes the per-style text prompts exactly as without a
+        reference; the IP-Adapter then ADDS the reference's visual style on
+        top of each text prompt during diffusion (image- and text-conditioning
+        are combined in the UNet; ``style_ref_scale`` — default
+        ``cfg.gen.ip_adapter_scale`` — balances the two, 0.0 = text only).
+        The reference is enabled for THIS run's diffusion phase only and
+        disabled afterwards, so later runs/re-forges start unstyled.
         """
         try:
-            yield from self._run(task, int(n_layouts), int(n_styles), int(seed))
+            yield from self._run(task, int(n_layouts), int(n_styles), int(seed),
+                                 style_ref=style_ref, style_ref_scale=style_ref_scale)
         except Exception as exc:  # noqa: BLE001 — never crash the UI handler
             logger.exception("forge run failed")
             yield ForgeEvent("error", {"fatal": True, "message": f"{type(exc).__name__}: {exc}"})
 
-    def _run(self, task: str, n_layouts: int, n_styles: int, seed: int) -> Iterator[ForgeEvent]:
+    def _run(self, task: str, n_layouts: int, n_styles: int, seed: int,
+             style_ref: Optional[Image.Image] = None,
+             style_ref_scale: Optional[float] = None) -> Iterator[ForgeEvent]:
         cfg = self.cfg
         n_layouts = max(1, min(n_layouts, 4))
         n_styles = max(2, min(n_styles, 6))
@@ -379,42 +393,62 @@ class ForgeRun:
         # ------------------------------------------------------------ diffusion
         total_imgs = len(layouts) * len(style_specs)
         t_diff = time.monotonic()
-        with gpu.phase("diffusion", cfg=cfg, vram_log=vram_log):
-            self.ensure_pipeline()
-            done_count = 0
-            for rec in layouts:  # PINNED layout-major (§4.8): outer layouts...
-                control = Image.open(rec.control_path).convert("RGB")
-                layout_dir = run_dir / f"layout_{rec.layout_idx}"
-                lstate = self._state_entry(state, rec.layout_idx)
-                for style_idx, style in enumerate(style_specs):  # ...inner styles
-                    gen_seed = seed + rec.layout_idx * 1000 + style_idx  # §7.2 seed law
-                    t0 = time.monotonic()
-                    img = self.pipeline.generate(
-                        control, style.prompt, style.negative_prompt, gen_seed,
-                        cond_scale=cfg.gen.cond_scale, steps=cfg.gen.steps)
-                    gen_s = time.monotonic() - t0
-                    paths = self._write_image_set(img, rec.render.instances,
-                                                  layout_dir, style.name)
-                    images.append(GeneratedImage(paths["off"], rec.layout_idx,
-                                                 style.name, gen_seed,
-                                                 round(gen_s, 3)))
-                    if lstate is not None:
-                        lstate["images"][style.name] = paths
-                    done_count += 1
+        ip_scale = float(style_ref_scale if style_ref_scale is not None
+                         else cfg.gen.ip_adapter_scale)
+        style_ref_meta: Optional[dict] = None
+        if style_ref is not None:
+            ref_path = run_dir / "style_ref.png"  # provenance (§4.7 artifacts)
+            style_ref.convert("RGB").save(ref_path)
+            style_ref_meta = {"path": str(ref_path), "scale": ip_scale,
+                              "adapter": "h94/IP-Adapter sdxl vit-h"}
+            state["style_ref"] = style_ref_meta
+        try:
+            with gpu.phase("diffusion", cfg=cfg, vram_log=vram_log):
+                self.ensure_pipeline()
+                if style_ref is not None:
+                    # IP-Adapter ADDS the reference's visual style on top of
+                    # the LLM style prompts — enabled for this run only.
                     yield ForgeEvent("status", {
-                        "stage": f"forging {done_count}/{total_imgs}"})
-                    yield ForgeEvent("image", {
-                        "layout_idx": rec.layout_idx,
-                        "style": style.name,
-                        "style_idx": style_idx,
-                        "path": paths["off"],
-                        "overlays": paths,
-                        "seed": gen_seed,
-                        "gen_seconds": round(gen_s, 3),
-                        "index": done_count,
-                        "total": total_imgs,
-                    })
-            timings["diffusion_peak_vram"] = self._peak_vram()
+                        "stage": f"style reference on (scale {ip_scale:.2f})"})
+                    self.pipeline.enable_style_reference(style_ref, scale=ip_scale)
+                done_count = 0
+                for rec in layouts:  # PINNED layout-major (§4.8): outer layouts...
+                    control = Image.open(rec.control_path).convert("RGB")
+                    layout_dir = run_dir / f"layout_{rec.layout_idx}"
+                    lstate = self._state_entry(state, rec.layout_idx)
+                    for style_idx, style in enumerate(style_specs):  # ...inner styles
+                        gen_seed = seed + rec.layout_idx * 1000 + style_idx  # §7.2 seed law
+                        t0 = time.monotonic()
+                        img = self.pipeline.generate(
+                            control, style.prompt, style.negative_prompt, gen_seed,
+                            cond_scale=cfg.gen.cond_scale, steps=cfg.gen.steps)
+                        gen_s = time.monotonic() - t0
+                        paths = self._write_image_set(img, rec.render.instances,
+                                                      layout_dir, style.name)
+                        images.append(GeneratedImage(paths["off"], rec.layout_idx,
+                                                     style.name, gen_seed,
+                                                     round(gen_s, 3)))
+                        if lstate is not None:
+                            lstate["images"][style.name] = paths
+                        done_count += 1
+                        yield ForgeEvent("status", {
+                            "stage": f"forging {done_count}/{total_imgs}"})
+                        yield ForgeEvent("image", {
+                            "layout_idx": rec.layout_idx,
+                            "style": style.name,
+                            "style_idx": style_idx,
+                            "path": paths["off"],
+                            "overlays": paths,
+                            "seed": gen_seed,
+                            "gen_seconds": round(gen_s, 3),
+                            "index": done_count,
+                            "total": total_imgs,
+                        })
+                timings["diffusion_peak_vram"] = self._peak_vram()
+        finally:
+            if style_ref is not None:
+                # later runs / re-forges start unstyled (run() docstring)
+                self.pipeline.disable_style_reference()
         timings["diffusion_s"] = round(time.monotonic() - t_diff, 3)
         timings["diffusion_s_per_img"] = round(
             (time.monotonic() - t_diff) / max(1, len(images)), 3)
@@ -438,6 +472,7 @@ class ForgeRun:
             "n_layouts": n_layouts,
             "n_styles": n_styles,
             "config": cfg.model_dump(mode="json"),
+            "style_ref": style_ref_meta,  # None unless a reference was used
             "timings": timings,
             "vram_log": vram_log,
             "style_clip_tokens": [

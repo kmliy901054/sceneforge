@@ -38,6 +38,7 @@ class GenConfig(BaseModel):
     level: Literal["L0", "L1", "L2", "L3", "L4"] = "L0"          # ladder §7.4
     depth_mode: Literal["disparity", "linear"] = "disparity"     # A/B winner §7.3
     s_per_img: Optional[float] = Field(None, gt=0)               # MEASURED by M1 (§7.4)
+    ip_adapter_scale: float = Field(0.6, ge=0.0, le=1.5)         # style-reference strength
 
 
 class VramConfig(BaseModel):

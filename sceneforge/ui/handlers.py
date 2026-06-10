@@ -114,8 +114,15 @@ FORGE_OUTPUTS = ("status_md", "plan_stream", "spec_json", "source_md",
 
 
 def on_forge(task: str, n_layouts: float, n_styles: float, seed: float,
-             overlay_mode: str) -> Iterator[tuple]:
-    """Generator handler for the FORGE button (§11 demo pacing)."""
+             overlay_mode: str, style_ref: Any = None,
+             style_scale: Optional[float] = None) -> Iterator[tuple]:
+    """Generator handler for the FORGE button (§11 demo pacing).
+
+    ``style_ref``/``style_scale`` come from the optional style-reference
+    accordion (gr.Image type="pil" + scale slider). When an image is set it is
+    passed through ``ForgeRun.run`` and the IP-Adapter adds its visual style
+    ON TOP of the LLM-generated style prompts; None = classic text-only forge.
+    """
     runner = get_runner()
     task = (task or "").strip() or DEFAULT_TASK
     out: dict[str, Any] = {
@@ -142,7 +149,10 @@ def on_forge(task: str, n_layouts: float, n_styles: float, seed: float,
     state: dict = {"layouts": [], "styles": []}
     last_layout, last_style = -1, -1
 
-    for event in runner.run(task, int(n_layouts), int(n_styles), int(seed)):
+    for event in runner.run(task, int(n_layouts), int(n_styles), int(seed),
+                            style_ref=style_ref,
+                            style_ref_scale=(float(style_scale)
+                                             if style_scale is not None else None)):
         kind, p = event.kind, event.payload
 
         if kind == "plan_token":

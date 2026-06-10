@@ -4,15 +4,24 @@
 
 SceneForge turns one sentence — *"pick the red mug from a cluttered kitchen table"* — into a downloadable COCO dataset with pixel-perfect instance masks. A local LLM plans the 3D scene as validated JSON; a deterministic headless renderer owns the geometry, producing depth maps and exact instance masks; depth-ControlNet SDXL-Lightning then re-textures that *same geometry* into N photoreal style worlds. Because geometry is preserved across variants, the renderer's masks and boxes transfer to every generated image for free — and OWLv2 spot-checks that claim on every image (recall *and* hallucination), auto-quarantining drifters. Everything runs locally on a single 24 GB GPU.
 
+![SceneForge demo — gallery fills live, mask overlay toggles, camera re-forge in 1.8 s](docs/img/demo.gif)
+
+*15-second highlight of one live, unmocked session: the style gallery fills in real time (shown 2×), the mask overlay swaps instantly from the cached path, and a camera re-forge re-labels the moved scene in 1.8 s with no LLM call.*
+
 ![SceneForge UI](docs/img/ui_forged.png)
 
-Demo video: see [`docs/demo/`](docs/demo/).
+Full 74 s demo video and capture notes: see [`docs/demo/`](docs/demo/).
 
 ---
 
 ## Architecture
 
-```
+![SceneForge pipeline: Director LLM → SceneSpec → Scene Engine → Diffusion → Labels → Eval, with VRAM phase orchestration and the Gradio UI alongside](docs/img/architecture.png)
+
+<details>
+<summary>ASCII version (for terminal readers)</summary>
+
+```text
  task: "pick the red mug from a cluttered kitchen table"
         │
         ▼
@@ -42,6 +51,8 @@ Demo video: see [`docs/demo/`](docs/demo/).
 │ → fidelity_adj → quarantine │   │ export · stage status + VRAM       │
 └─────────────────────────────┘   └────────────────────────────────────┘
 ```
+
+</details>
 
 ### The six stages
 
@@ -74,7 +85,7 @@ Demo video: see [`docs/demo/`](docs/demo/).
 > **Performance (RTX 3090, 768², fp16):**
 > raw generation **0.75 s/img** · end-to-end warm forge (2 layouts × 4 styles) **35.8 s** · re-forge (camera/seed nudge, no LLM) **1.7 s**.
 >
-> **Tests:** 189 green (`./scripts/run_tests.sh`).
+> **Tests:** 229 green (`./scripts/run_tests.sh`).
 
 Full numbers and methodology: [`docs/m1_report.md`](docs/m1_report.md).
 
@@ -110,10 +121,11 @@ scripts/demo_prep.sh     # pre-warms gemma + SDXL + one throwaway forge
 Run the test suite:
 
 ```bash
-./scripts/run_tests.sh   # 189 tests
+./scripts/run_tests.sh   # 229 tests
 ```
 
 Notes:
+
 - Every LLM-touching path has a deterministic fallback — a forge completes end-to-end even with the Ollama server stopped (`source: fallback` shown in the UI).
 - Runtime knobs live in [`sceneforge.yaml`](sceneforge.yaml) (overridable via `SCENEFORGE_<SECTION>_<FIELD>` env vars).
 - Run artifacts land in `outputs/runs/<run_id>/` (specs, depth/seg/control images, GLBs, per-image fidelity, COCO export).
@@ -122,7 +134,7 @@ Notes:
 
 ## Repository layout
 
-```
+```text
 app.py                  # entry point: python app.py → Gradio on :7860
 sceneforge.yaml         # runtime config (gen level, VRAM mode — frozen by M1)
 requirements.txt        # exact pins
@@ -137,14 +149,17 @@ sceneforge/
   diffusion/            # depth→disparity control prep + custom SDXL pipeline
   labels/               # masks/RLE, overlays, COCO writer + zip export
   eval/                 # OWLv2 fidelity scorer (recall + hallucination)
-  ui/                   # Gradio blocks + handlers
+  augment/              # v2: real-frame restyler + native LeRobot v2.x reader/writer (lerobot_io.py)
+  ui/                   # Gradio blocks + handlers (Forge tab + Video Augment tab)
 assets/cards|index/     # asset cards + committed embedding cache
-scripts/                # run_tests.sh · demo_prep.sh · m1_smoketest.py · ...
-tests/                  # 189 tests
+scripts/                # run_tests.sh · demo_prep.sh · m1_smoketest.py ·
+                        # augment_frames.py · augment_dataset.py · forge_viewsweep.py · ...
+tests/                  # 229 tests
 docs/                   # see below
 ```
 
 Deeper reading:
+
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full design doc: schemas, coordinate conventions, data contracts, VRAM policy, every settled decision.
 - [`docs/WORKFLOW_LOG.md`](docs/WORKFLOW_LOG.md) — **agent collaboration log (course deliverable)**: how the project was ideated, reviewed, built, and verified by a multi-agent workflow.
 - [`docs/m1_report.md`](docs/m1_report.md) — quantitative go/no-go report behind the results box above.
