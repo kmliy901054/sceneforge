@@ -19,6 +19,7 @@ module is developed concurrently.
 from __future__ import annotations
 
 import math
+import threading
 from typing import TYPE_CHECKING, Optional
 
 import sceneforge.compat  # noqa: F401  (np.infty + PYOPENGL_PLATFORM before pyrender)
@@ -70,6 +71,14 @@ class PyrenderBackend:
     def __init__(self) -> None:
         self._renderer: Optional[pyrender.OffscreenRenderer] = None
         self._size: Optional[tuple[int, int]] = None
+        # Gradio 6 runs each event handler on a (possibly different) worker
+        # thread. pyrender leaves the EGL context CURRENT on the thread that
+        # rendered last and never releases it (EGLPlatform.make_uncurrent is
+        # `pass` in 0.1.45) — the next render from another thread then fails
+        # with eglMakeCurrent EGL_BAD_ACCESS (err 12290; hit live by
+        # on_forge → on_reforge). Fix: serialize renders and explicitly unbind
+        # the context from the thread after every render.
+        self._gl_lock = threading.Lock()
 
     # -- offscreen renderer lifecycle (§5.4: persistent, recreated on size change) --
     def _offscreen(self, width: int, height: int) -> pyrender.OffscreenRenderer:
@@ -86,6 +95,29 @@ class PyrenderBackend:
             self._renderer.delete()
             self._renderer = None
             self._size = None
+
+    def _release_context(self) -> None:
+        """Unbind the GL context from the current thread (see __init__ note).
+
+        pyrender 0.1.45's ``EGLPlatform.make_uncurrent`` is a no-op, so the
+        unbind is issued directly via EGL; the osmesa/pyglet platforms get
+        their own ``make_uncurrent`` called as a best effort.
+        """
+        platform = getattr(self._renderer, "_platform", None)
+        if platform is None:
+            return
+        display = getattr(platform, "_egl_display", None)
+        try:
+            if display is not None:
+                from OpenGL.EGL import (EGL_NO_CONTEXT, EGL_NO_SURFACE,
+                                        eglMakeCurrent)
+
+                eglMakeCurrent(display, EGL_NO_SURFACE, EGL_NO_SURFACE,
+                               EGL_NO_CONTEXT)
+            else:
+                platform.make_uncurrent()
+        except Exception:  # noqa: BLE001 — never fail a render on unbind
+            pass
 
     # ------------------------------- main entry -------------------------------
     def render_scene(
@@ -121,23 +153,28 @@ class PyrenderBackend:
             pyrender.DirectionalLight(intensity=_DIRECTIONAL_INTENSITY), pose=pose
         )
 
-        renderer = self._offscreen(width, height)
+        with self._gl_lock:  # one GL context; Gradio handlers hop threads
+            try:
+                renderer = self._offscreen(width, height)
 
-        # Pass 1: flat-shaded color preview + z-buffer depth (meters, 0 = no hit).
-        color, depth = renderer.render(scene)
-        color = np.ascontiguousarray(color[:, :, :3], dtype=np.uint8)
-        depth_m = np.ascontiguousarray(depth, dtype=np.float32)
+                # Pass 1: flat-shaded color preview + z-buffer depth (meters,
+                # 0 = no hit).
+                color, depth = renderer.render(scene)
+                color = np.ascontiguousarray(color[:, :, :3], dtype=np.uint8)
+                depth_m = np.ascontiguousarray(depth, dtype=np.float32)
 
-        # Pass 2: SEG — instance_id in RED channel; floor/table omitted from the
-        # map are skipped by pyrender → black background (§12-B).
-        seg_node_map = {
-            node: (instance_id, 0, 0)
-            for instance_id, node in node_for_instance.items()
-        }
-        seg, _ = renderer.render(
-            scene, flags=pyrender.RenderFlags.SEG, seg_node_map=seg_node_map
-        )
-        seg_ids = seg[:, :, 0].astype(np.int32)
+                # Pass 2: SEG — instance_id in RED channel; floor/table omitted
+                # from the map are skipped by pyrender → black background (§12-B).
+                seg_node_map = {
+                    node: (instance_id, 0, 0)
+                    for instance_id, node in node_for_instance.items()
+                }
+                seg, _ = renderer.render(
+                    scene, flags=pyrender.RenderFlags.SEG, seg_node_map=seg_node_map
+                )
+                seg_ids = seg[:, :, 0].astype(np.int32)
+            finally:
+                self._release_context()
 
         instances: list[InstanceLabel] = (
             _extract_instances(seg_ids, spec) if spec is not None else []

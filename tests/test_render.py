@@ -108,6 +108,31 @@ def test_seg_byte_identical_across_two_renders(backend, composed):
     assert a.seg_ids.tobytes() == b.seg_ids.tobytes()
 
 
+def test_render_from_different_threads(backend, composed):
+    """Gradio 6 runs handlers on changing worker threads: a render must work
+    after the EGL context was last used on ANOTHER thread (regression: live
+    on_forge → on_reforge died with eglMakeCurrent EGL_BAD_ACCESS 12290)."""
+    import threading
+
+    ref = backend.render_scene(composed, CameraSpec(), 256, 256)
+    box: dict = {}
+
+    def worker():
+        try:
+            box["result"] = backend.render_scene(composed, CameraSpec(), 256, 256)
+        except Exception as exc:  # noqa: BLE001
+            box["error"] = exc
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+    assert "error" not in box, f"cross-thread render failed: {box.get('error')}"
+    assert box["result"].seg_ids.tobytes() == ref.seg_ids.tobytes()
+    # and back on the original thread
+    again = backend.render_scene(composed, CameraSpec(), 256, 256)
+    assert again.seg_ids.tobytes() == ref.seg_ids.tobytes()
+
+
 def test_offscreen_renderer_persistence(backend, composed):
     """§5.4: one persistent OffscreenRenderer, recreated only on size change."""
     backend.render_scene(composed, CameraSpec(), 256, 256)

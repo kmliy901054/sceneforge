@@ -105,9 +105,9 @@
   },
   {
     "asset_id": "cutting_board",
-    "name": "cutting board",
+    "name": "cutting_board",
     "description": "A flat rectangular wooden cutting board.",
-    "synonyms": ["chopping board", "cutting surface", "bread board", "butcher block", "board to chop vegetables on"],
+    "synonyms": ["cutting board", "chopping board", "cutting surface", "bread board", "butcher block", "board to chop vegetables on"],
     "affordances": ["place items on", "chop on", "carry"],
     "nominal_height_m": 0.018
   },
