@@ -152,25 +152,9 @@ Two final parallel agents produced the README (166 lines, with the measured numb
 
 ---
 
-## Phase 5 — Research Extension: the VLA 3D-Understanding Hypothesis (2026-06-10)
+## Phase 5 — v2: video-first robot-data tools (2026-06-10)
 
-After submission, the developer posed a research hypothesis from their own VLA experience: *current VLAs lack 3D spatial understanding — they memorize RGB appearance and collapse when scene/lighting changes.* The agentic workflow was turned onto this question: a 3-angle literature sweep (web agents) ran in parallel with a **real probe experiment on this machine**, followed by a second-model comparison. Full write-ups: [`research/vla_3d_hypothesis_literature.md`](research/vla_3d_hypothesis_literature.md), [`../experiments/vla_probe/REPORT.md`](../experiments/vla_probe/REPORT.md), [`../experiments/vla_probe/COMPARISON.md`](../experiments/vla_probe/COMPARISON.md).
-
-**Literature verdict:** substantially correct with two corrections — (A) the catastrophic axis is *camera viewpoint / spatial shift* (e.g. LIBERO-Plus: OpenVLA 76.5%→1.1%), not background/lighting (mildest, 5–25 pts); (B) "no 3D understanding" overstates it — the brittle part is perception-to-action *grounding* (INT-ACT: π0 keeps 84.5% semantic intention while success falls to 30.4%).
-
-**Probe experiment (designed and run by agents on the RTX 3090):** SceneForge's core trick inverted into a measurement instrument — hold geometry fixed, perturb only appearance, measure VLA action deviation. 22 real BridgeData V2 frames × 20 variants × deterministic inference = 440 predictions per model:
-
-| Arm | OpenVLA-7B | SpatialVLA-4B (3D-aware, 2025) |
-|---|---|---|
-| JPEG floor | 0.72 mm | 0.63 mm |
-| P photometric | 2.45 mm | 3.42 mm |
-| S background-restyle (workspace pixel-identical) | 6.07 mm | 6.37 mm |
-| G geometry baseline | 8.91 mm | 8.61 mm |
-| T temporal (t+3) | 16.4 mm | 23.8 mm |
-
-Findings: the *strong* hypothesis form (appearance dominates) is **not** supported — deviations order exactly as a grounded policy should. The *weak* form **is** supported: restyling pixels the robot never needs (background only) still moves commanded translation ~6 mm ≈ 8× the measurement floor ≈ 68–74% of a genuine geometric change — appearance measurably leaks into the action head. The falsifiable cross-model prediction (3D-aware SpatialVLA disentangles better) **failed**: S/G 0.74 vs 0.68, all paired tests p ≥ 0.22 — plausibly because SpatialVLA's Ego3D channel is ZoeDepth *estimated from the same RGB*, i.e. RGB-derived 3D is not real 3D grounding.
-
-**Consequences implemented as SceneForge v2** (each maps to a measured failure mode): `augment` module + `scripts/augment_frames.py` (ROSIE-style background restyle of *real* robot episodes → appearance-invariance training data, productized from the probe's S-arm code); `scripts/forge_viewsweep.py` (same-scene × camera-grid COCO export → attacks the catastrophic viewpoint axis); RGB-D + camera-parameter export in the COCO zip (true rendered depth for 3D-grounded training, not RGB-estimated depth).
+Robot-learning datasets are mostly video episodes, so v2 extended SceneForge beyond single images: the `sceneforge.augment` module + `scripts/augment_frames.py` (appearance randomization of real robot frames/videos with bitwise-preserved workspace pixels and temporally smoothed masks, video in → video out), `scripts/forge_viewsweep.py` (camera-grid viewpoint-randomized COCO export with per-image K/pose), and RGB-D + camera-parameter export as the default. Implemented and validated end-to-end by a dedicated agent (21 new tests; 210 green).
 
 ### Final tally of the agentic build
 

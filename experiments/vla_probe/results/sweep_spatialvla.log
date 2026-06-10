@@ -1,24 +1,0 @@
-440 predictions to run
-Add 0 TRANSLATION TOKENS, tokenizer vocab size 257152 / 265347
-Add 0 ROTATION TOKENS to tokenizer, tokenizer vocab size 257152 / 265347
-Add 0 GRIPPER TOKENS to tokenizer, tokenizer vocab size 257152 / 265347
-Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  3.19it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.80it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.69it/s]
-25/440  24s  (0.96s/pred)
-50/440  47s  (0.95s/pred)
-75/440  71s  (0.94s/pred)
-100/440  94s  (0.94s/pred)
-125/440  117s  (0.94s/pred)
-150/440  141s  (0.94s/pred)
-175/440  164s  (0.94s/pred)
-200/440  187s  (0.94s/pred)
-225/440  210s  (0.93s/pred)
-250/440  233s  (0.93s/pred)
-275/440  256s  (0.93s/pred)
-300/440  279s  (0.93s/pred)
-325/440  302s  (0.93s/pred)
-350/440  325s  (0.93s/pred)
-375/440  348s  (0.93s/pred)
-400/440  371s  (0.93s/pred)
-425/440  393s  (0.93s/pred)
-determinism re-check max |diff|: 0.0
-saved 440 actions  total 408s
